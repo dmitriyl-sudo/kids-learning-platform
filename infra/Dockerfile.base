@@ -1,0 +1,50 @@
+# Базовый Dockerfile для всех сервисов
+FROM node:20-alpine AS base
+
+# Установка pnpm
+RUN npm install -g pnpm@8.10.0
+
+# Установка необходимых системных пакетов
+RUN apk add --no-cache \
+    curl \
+    dumb-init
+
+# Создание рабочего каталога
+WORKDIR /app
+
+# Копирование package.json файлов
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/ ./apps/
+COPY packages/ ./packages/
+COPY turbo.json ./
+
+# Установка зависимостей
+RUN pnpm install --frozen-lockfile
+
+# Сборка общих пакетов
+RUN pnpm build --filter=@kids-learning/config
+RUN pnpm build --filter=@kids-learning/common
+
+# Production стейдж
+FROM node:20-alpine AS production
+
+RUN npm install -g pnpm@8.10.0
+RUN apk add --no-cache dumb-init curl
+
+WORKDIR /app
+
+# Копирование зависимостей из base стейджа
+COPY --from=base /app/node_modules ./node_modules
+COPY --from=base /app/packages ./packages
+
+# Создание пользователя для безопасности
+RUN addgroup -g 1001 -S nodejs
+RUN adduser -S nestjs -u 1001
+
+USER nestjs
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:$PORT/health || exit 1
+
+ENTRYPOINT ["dumb-init", "--"]

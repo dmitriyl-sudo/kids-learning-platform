@@ -1,0 +1,136 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Основная модель пользователя (родители и дети)
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         String   // 'parent' | 'child'
+  parentId     String?  // Для детей - ссылка на родителя
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Отношения
+  parent         User?           @relation("ParentChild", fields: [parentId], references: [id])
+  children       User[]          @relation("ParentChild")
+  parentProfile  ParentProfile?
+  childProfile   ChildProfile?
+  wallet         Wallet?
+
+  @@map("users")
+}
+
+// Профиль родителя
+model ParentProfile {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  settingsJSON String   @default("{}")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Отношения
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("parent_profiles")
+}
+
+// Профиль ребенка с настройками обучения
+model ChildProfile {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  nativeLang   String   @default("ru") // Родной язык
+  targetLang   String   @default("en") // Изучаемый язык
+  settingsJSON String   @default("{}") // Дополнительные настройки
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Отношения
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("child_profiles")
+}
+
+// Кошелек для внутриигровой валюты
+model Wallet {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  balance   Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Отношения
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions WalletTransaction[]
+
+  @@map("wallets")
+}
+
+// Транзакции кошелька (для истории)
+model WalletTransaction {
+  id          String   @id @default(cuid())
+  walletId    String
+  amount      Int      // Положительное для пополнения, отрицательное для списания
+  type        String   // 'earn' | 'spend' | 'bonus' | 'penalty'
+  description String?
+  createdAt   DateTime @default(now())
+
+  // Отношения
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@map("wallet_transactions")
+}
+
+// Карточки для обучения (будут генерироваться AI)
+model LearningCard {
+  id           String   @id @default(cuid())
+  topic        String   // Тема: animals, colors, numbers, etc.
+  nativeText   String   // Текст на родном языке
+  targetText   String   // Текст на изучаемом языке
+  nativeLang   String   // Код языка
+  targetLang   String   // Код языка
+  difficulty   Int      @default(1) // Уровень сложности 1-5
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("learning_cards")
+}
+
+// Прогресс изучения ребенка
+model LearningProgress {
+  id             String   @id @default(cuid())
+  userId         String   // ID ребенка
+  cardId         String   // ID карточки
+  correctAnswers Int      @default(0)
+  totalAttempts  Int      @default(0)
+  lastStudiedAt  DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([userId, cardId])
+  @@map("learning_progress")
+}
+
+// Сессии обучения (для контроля времени и перерывов)
+model StudySession {
+  id          String    @id @default(cuid())
+  userId      String    // ID ребенка
+  startedAt   DateTime  @default(now())
+  endedAt     DateTime?
+  durationMs  Int?      // Длительность в миллисекундах
+  cardsCount  Int       @default(0) // Количество изученных карточек
+  earnedCoins Int       @default(0) // Заработанные монеты
+
+  @@map("study_sessions")
+}

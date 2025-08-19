@@ -1,0 +1,274 @@
+version: '3.8'
+
+services:
+  # PostgreSQL база данных
+  postgres:
+    image: postgres:15-alpine
+    container_name: kids-learning-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: kids_learning
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - internal_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis для кэширования и сессий
+  redis:
+    image: redis:7-alpine
+    container_name: kids-learning-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - internal_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ClickHouse для аналитики и логирования
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.8-alpine
+    container_name: kids-learning-clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: analytics
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - internal_net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.gateway
+    container_name: kids-learning-api-gateway
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      API_GATEWAY_PORT: 3000
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/kids_learning?schema=public
+      REDIS_URL: redis://redis:6379
+      CLICKHOUSE_URL: http://clickhouse:8123
+      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+      AUTH_SERVICE_PORT: 3001
+      PROFILE_SERVICE_PORT: 3002
+      LEARNING_SERVICE_PORT: 3003
+      REWARDS_SERVICE_PORT: 3004
+      LOGGING_SERVICE_PORT: 3005
+    ports:
+      - "3000:3000"
+    networks:
+      - internal_net
+      - public_net
+    depends_on:
+      - postgres
+      - redis
+      - clickhouse
+      - auth-service
+      - profile-service
+      - learning-service
+      - rewards-service
+      - logging-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Auth Service
+  auth-service:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.auth
+    container_name: kids-learning-auth-service
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/kids_learning?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+      JWT_EXPIRES_IN: 24h
+    ports:
+      - "3001:3001"
+    networks:
+      - internal_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Profile Service
+  profile-service:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.profile
+    container_name: kids-learning-profile-service
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: 3002
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/kids_learning?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+    ports:
+      - "3002:3002"
+    networks:
+      - internal_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Learning Service
+  learning-service:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.learning
+    container_name: kids-learning-learning-service
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: 3003
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/kids_learning?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+    ports:
+      - "3003:3003"
+    networks:
+      - internal_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Rewards Service
+  rewards-service:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.rewards
+    container_name: kids-learning-rewards-service
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: 3004
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/kids_learning?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+    ports:
+      - "3004:3004"
+    networks:
+      - internal_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Logging Service
+  logging-service:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.logging
+    container_name: kids-learning-logging-service
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: 3005
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/kids_learning?schema=public
+      REDIS_URL: redis://redis:6379
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_DATABASE: analytics
+      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+    ports:
+      - "3005:3005"
+    networks:
+      - internal_net
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    container_name: kids-learning-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+    networks:
+      - public_net
+    depends_on:
+      - api-gateway
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# Сети
+networks:
+  internal_net:
+    driver: bridge
+    internal: false
+  public_net:
+    driver: bridge
+
+# Тома для данных
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  clickhouse_data:
+    driver: local
